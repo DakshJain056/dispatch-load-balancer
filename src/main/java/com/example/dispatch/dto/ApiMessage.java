@@ -1,3 +1,2 @@
 package com.example.dispatch.dto;
-
-public record ApiMessage(String message, String status) {}
+public record ApiMessage(String message, String status, int recordsAffected) {}

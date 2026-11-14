@@ -1,0 +1,7 @@
+{
+  "name": "Dispatch Load Balancer (Java 17)",
+  "image": "mcr.microsoft.com/devcontainers/java:1-17-bullseye",
+  "features": { "ghcr.io/devcontainers/features/java:1": { "version": "17", "installMaven": true } },
+  "forwardPorts": [8080],
+  "postCreateCommand": "mvn -version"
+}

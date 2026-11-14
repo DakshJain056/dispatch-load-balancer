@@ -3,5 +3,7 @@ services:
     name: dispatch-load-balancer
     runtime: docker
     plan: free
-    healthCheckPath: /swagger-ui.html
-    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: JAVA_OPTS
+        value: -XX:MaxRAMPercentage=75.0

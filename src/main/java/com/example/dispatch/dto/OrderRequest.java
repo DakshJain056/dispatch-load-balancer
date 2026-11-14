@@ -1,13 +1,12 @@
 package com.example.dispatch.dto;
 
-import com.example.dispatch.model.Priority;
 import jakarta.validation.constraints.*;
 
 public record OrderRequest(
-    @NotBlank String orderId,
-    @DecimalMin("-90.0") @DecimalMax("90.0") double latitude,
-    @DecimalMin("-180.0") @DecimalMax("180.0") double longitude,
-    @NotBlank String address,
-    @Positive double packageWeight,
+    @NotBlank @Size(max=64) String orderId,
+    @NotNull @DecimalMin(value="-90.0") @DecimalMax(value="90.0") Double latitude,
+    @NotNull @DecimalMin(value="-180.0") @DecimalMax(value="180.0") Double longitude,
+    @NotBlank @Size(max=500) String address,
+    @NotNull @Positive Double packageWeight,
     @NotNull Priority priority
 ) {}

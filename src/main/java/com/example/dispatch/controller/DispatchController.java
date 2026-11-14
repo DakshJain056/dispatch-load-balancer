@@ -10,34 +10,24 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/dispatch")
-@Tag(name = "Dispatch", description = "Delivery order and fleet dispatch operations")
+@Tag(name="Dispatch",description="Priority-aware delivery allocation and route planning")
 public class DispatchController {
-    private final DispatchService dispatchService;
-
-    public DispatchController(DispatchService dispatchService) { this.dispatchService = dispatchService; }
+    private final DispatchService service;
+    public DispatchController(DispatchService service){this.service=service;}
 
     @PostMapping("/orders")
-    @Operation(summary = "Create or update delivery orders", description = "Upserts orders by orderId.")
-    public ResponseEntity<ApiMessage> acceptOrders(@Valid @RequestBody OrdersRequest request) {
-        dispatchService.upsertOrders(request.orders());
-        return ResponseEntity.ok(new ApiMessage("Delivery orders accepted.", "success"));
-    }
+    @Operation(summary="Create or update orders",description="Upserts by orderId. A repeated ID updates the existing order.")
+    public ResponseEntity<ApiMessage> orders(@Valid @RequestBody OrdersRequest request){int n=service.upsertOrders(request.orders());return ResponseEntity.ok(new ApiMessage("Delivery orders accepted.","success",n));}
 
     @PostMapping("/vehicles")
-    @Operation(summary = "Create or update fleet vehicles", description = "Upserts vehicles by vehicleId.")
-    public ResponseEntity<ApiMessage> acceptVehicles(@Valid @RequestBody VehiclesRequest request) {
-        dispatchService.upsertVehicles(request.vehicles());
-        return ResponseEntity.ok(new ApiMessage("Vehicle details accepted.", "success"));
-    }
+    @Operation(summary="Create or update vehicles",description="Upserts by vehicleId. A repeated ID updates the existing vehicle.")
+    public ResponseEntity<ApiMessage> vehicles(@Valid @RequestBody VehiclesRequest request){int n=service.upsertVehicles(request.vehicles());return ResponseEntity.ok(new ApiMessage("Vehicle details accepted.","success",n));}
 
     @GetMapping("/plan")
-    @Operation(summary = "Retrieve optimized dispatch plan", description = "HIGH priority orders are assigned before MEDIUM and LOW.")
-    public DispatchPlanResponse getPlan() { return dispatchService.buildPlan(); }
+    @Operation(summary="Generate dispatch plan",description="Assigns HIGH before MEDIUM before LOW, respects capacity, and refines routes using Haversine distances.")
+    public DispatchPlanResponse plan(){return service.buildPlan();}
 
     @DeleteMapping("/data")
-    @Operation(summary = "Clear in-memory orders and vehicles", description = "Useful for resetting local/demo data.")
-    public ApiMessage clearData() {
-        dispatchService.clearAll();
-        return new ApiMessage("Dispatch data cleared.", "success");
-    }
+    @Operation(summary="Clear all orders and vehicles",description="Deletes all stored dispatch data; intended for test/reset use.")
+    public ApiMessage clear(){service.clearAll();return new ApiMessage("Dispatch data cleared.","success",0);}
 }

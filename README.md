@@ -1,79 +1,150 @@
-# Dispatch Load Balancer
+# Dispatch Load Balancer — final submission
 
-A Java 17 / Spring Boot REST API that allocates delivery orders to vehicles using priority-first dispatching, vehicle capacity constraints, and Haversine distance.
+A Java 17 / Spring Boot 3.4.5 REST API for capacity-constrained delivery dispatch. It accepts orders and fleet details, assigns orders in HIGH → MEDIUM → LOW priority tiers, calculates route distance with the Haversine formula, and returns vehicle details, route stops, load, distance, and unassigned-order reasons.
 
-## Requirements
+## Assignment criteria coverage
+
+| Assignment / evaluation criterion | Implementation |
+|---|---|
+| Java | Java 17, Spring Boot 3.4.5, Maven |
+| REST APIs; no UI | JSON REST endpoints under `/api/dispatch` |
+| Postman testable | `postman/Dispatch-Load-Balancer.postman_collection.json` includes the 30-order / 5-vehicle dataset and validation request |
+| Modular design | Controller, DTO, entity, repository, service, optimizer, distance calculator, exception handler separated by responsibility |
+| API documentation | OpenAPI 3 + Swagger UI |
+| JUnit tests | Haversine tests, allocation/capacity/priority tests, and repository/service integration tests |
+| Efficient upsert | Spring Data JPA repositories use `saveAll` with IDs as primary keys; existing IDs update, new IDs insert; JDBC batch settings enabled |
+| Error handling | Bean Validation, duplicate-ID checks, malformed JSON/enum handling, structured 400 responses, safe storage/internal error responses |
+| Performance | Batch persistence, bounded request sizes, deterministic allocation, bounded local-search passes |
+| Correctness | Capacity never exceeded; HIGH orders processed before MEDIUM and LOW; Haversine route totals; unassigned reasons included |
+| Required response fields | Vehicle capacity, current coordinates/address, assigned order details/addresses, total load, total distance |
+
+## Algorithm and honest optimization note
+
+1. Orders are processed by priority tier (`HIGH`, then `MEDIUM`, then `LOW`). Within each tier, orders are processed by `orderId` for deterministic behavior.
+2. For each order, the allocator checks every vehicle with sufficient remaining capacity and inserts the order at the route position with the smallest incremental Haversine distance.
+3. It refines each route with 2-opt and performs capacity-safe inter-vehicle relocation moves when they reduce the sum of route distances.
+4. All route distances are calculated in kilometers with mean Earth radius 6,371.0088 km.
+5. Distance is one-way: from the vehicle's current location through its assigned stops. No return-to-depot leg is counted.
+
+This is a deterministic, capacity-safe local-search heuristic. Vehicle routing with capacity constraints is a combinatorial optimization problem; the heuristic improves the route plan but does **not** mathematically guarantee the global optimum for every possible input. The response identifies the method so this limitation is explicit rather than claiming an unproven global minimum. For a production requirement that mandates a provably optimal solution, replace the heuristic with an exact MILP/constraint-programming solver and define a practical dataset/time limit.
+
+## Prerequisites
+
 - Java 17+
-- Maven 3.9+ (or use the included Maven wrapper after generating one with `mvn wrapper:wrapper`)
+- Maven 3.9+
 
-## Run locally
+## Run and test locally
+
 ```bash
-mvn clean test
+mkdir -p data
+mvn clean verify
 mvn spring-boot:run
 ```
-Application: `http://localhost:8080`  
-Swagger UI: `http://localhost:8080/swagger-ui.html`  
-OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+
+- API base: `http://localhost:8080`
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+- Health: `http://localhost:8080/health`
 
 ## API endpoints
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| POST | `/api/dispatch/orders` | Create/update orders by `orderId` |
-| POST | `/api/dispatch/vehicles` | Create/update vehicles by `vehicleId` |
-| GET | `/api/dispatch/plan` | Generate optimized dispatch plan |
-| DELETE | `/api/dispatch/data` | Clear in-memory data (demo/reset) |
+| POST | `/api/dispatch/orders` | Insert/update orders by `orderId` |
+| POST | `/api/dispatch/vehicles` | Insert/update vehicles by `vehicleId` |
+| GET | `/api/dispatch/plan` | Generate the dispatch plan |
+| DELETE | `/api/dispatch/data` | Delete all orders and vehicles (test/reset only) |
+| GET | `/health` | Hosting health check |
 
-### Submit orders
-```bash
-curl -X POST http://localhost:8080/api/dispatch/orders \
-  -H "Content-Type: application/json" \
-  -d '{"orders":[{"orderId":"ORD001","latitude":28.6139,"longitude":77.2090,"address":"Connaught Place, Delhi, India","packageWeight":15,"priority":"HIGH"}]}'
+### Example: submit orders
+
+```json
+{
+  "orders": [
+    {
+      "orderId": "ORD001",
+      "latitude": 28.6139,
+      "longitude": 77.209,
+      "address": "Connaught Place, Delhi, India",
+      "packageWeight": 15,
+      "priority": "HIGH"
+    }
+  ]
+}
 ```
 
-### Submit vehicles
-```bash
-curl -X POST http://localhost:8080/api/dispatch/vehicles \
-  -H "Content-Type: application/json" \
-  -d '{"vehicles":[{"vehicleId":"VEH001","capacity":100,"currentLatitude":28.7041,"currentLongitude":77.1025,"currentAddress":"Karol Bagh, Delhi, India"}]}'
+### Example: submit vehicles
+
+```json
+{
+  "vehicles": [
+    {
+      "vehicleId": "VEH001",
+      "capacity": 100,
+      "currentLatitude": 28.7041,
+      "currentLongitude": 77.1025,
+      "currentAddress": "Karol Bagh, Delhi, India"
+    }
+  ]
+}
 ```
 
-### Get plan
-```bash
-curl http://localhost:8080/api/dispatch/plan
-```
+### Response shape
 
-The response includes `dispatchPlan` and `unassignedOrders`. Every vehicle includes `totalLoad`, `totalDistance` and `assignedOrders`.
+`GET /api/dispatch/plan` returns `dispatchPlan`, `unassignedOrders`, aggregate assigned load/distance, counts, and the algorithm/distance definitions. Each vehicle includes `capacity`, `currentLatitude`, `currentLongitude`, `currentAddress`, `totalLoad`, `totalDistance`, `totalDistanceKm`, and `assignedOrders`. Each assigned order includes its address, coordinates, weight, and priority.
 
-## Algorithm and assumptions
-1. Orders are sorted by priority (`HIGH`, `MEDIUM`, `LOW`), then by `orderId` for deterministic output.
-2. Each order is assigned to the currently feasible vehicle whose last known position is closest to that order. Ties are resolved by vehicle ID.
-3. Vehicle capacity is never exceeded. Orders that cannot fit are returned in `unassignedOrders` with a reason.
-4. Haversine distance is calculated in kilometers using mean Earth radius 6,371.0088 km.
-5. Distance is the sequential route distance from the vehicle's current location through its assigned orders. A return trip to the depot is not included.
-6. This is a practical greedy heuristic, not a globally optimal vehicle-routing solver. It prioritizes correctness, deterministic behavior and efficient runtime for large input lists.
-7. Data is held in memory and is reset when the process restarts. This keeps the project self-contained for the assignment; replace the maps with a database repository for durable production storage.
+## Run the original assignment sample
 
-## Deployment (free-tier options)
-GitHub Pages cannot host Java/Spring Boot APIs because it only serves static sites. Use GitHub to store the code and a backend host such as Render for the API.
+The original sample payloads are included in `sample-data/`:
 
-### Deploy on Render
+- `sample-data/vehicles-5.json`
+- `sample-data/orders-30.json`
+
+Run in this order:
+
+1. `DELETE /api/dispatch/data`
+2. `POST /api/dispatch/vehicles` with `vehicles-5.json`
+3. `POST /api/dispatch/orders` with `orders-30.json`
+4. `GET /api/dispatch/plan`
+
+The source sample contains 30 orders and 5 vehicles. The sample's total order weight is 645 and total fleet capacity is 500, so at least 145 weight units cannot be carried even if all capacity is perfectly utilized. Because packages are indivisible, some vehicle capacity may remain unused.
+
+## Postman
+
+1. Import `postman/Dispatch-Load-Balancer.postman_collection.json` into Postman.
+2. Set collection variable `baseUrl` to `http://localhost:8080` or your deployed service URL.
+3. Run the requests in order: health, clear, vehicles, orders, plan. The invalid-order request is expected to return HTTP 400.
+
+## Storage and deployment notes
+
+The project uses Spring Data JPA with H2. By default it uses a local file database at `./data/dispatchdb`, so local data survives application restarts. For cloud hosting, the H2 file is only durable if the host provides a persistent disk mounted at the application working directory. Render's default ephemeral filesystem can lose data after a restart/redeploy; for durable hosted use, configure a managed PostgreSQL database by setting `DATABASE_URL` and the corresponding JDBC driver/configuration, or attach persistent storage. Do not run multiple replicas against a single local H2 file.
+
+### Deploy on Render using Docker
+
 1. Push this project to a GitHub repository.
-2. In Render, create **New → Web Service** and connect the repository.
-3. Choose Docker as the runtime (or choose native runtime with build command `mvn clean package -DskipTests` and start command `java -jar target/dispatch-load-balancer-1.0.0.jar`).
-4. For Docker, no additional environment variables are required. Render supplies `PORT`, which the application reads.
-5. After deployment, your API base URL will be `https://YOUR-SERVICE.onrender.com`.
-6. Swagger: `https://YOUR-SERVICE.onrender.com/swagger-ui.html`.
+2. In Render choose **New → Blueprint** and connect the repository (or create a Docker Web Service).
+3. Render detects `render.yaml` and builds the included Dockerfile.
+4. Wait for the service health check at `/health` to pass.
+5. Open `https://YOUR-SERVICE.onrender.com/swagger-ui.html`.
 
-Free hosting availability and limits can change; free instances may sleep when idle and take time to wake. Confirm current pricing/limits before relying on a host for a deadline. A public URL is only created after you complete deployment from your own hosting account.
+GitHub Pages cannot host a Spring Boot API; it only serves static websites. Free hosting plans and persistence features can change. Free instances may sleep when idle and take time to wake.
 
-## Testing
-```bash
-mvn test
-```
-The test suite covers Haversine identity, approximate distance, symmetry, capacity limits, priority order, no-vehicle cases, upsert behavior and duplicate identifiers.
+### Browser-only workflow with GitHub Codespaces
 
-## Notes for submission
-- Include your actual deployed API URL after deployment.
-- Include the Swagger URL above using the deployed host.
-- The current implementation uses in-memory storage; for multi-instance production deployment, use a persistent database and shared repository.
+Open the repository in GitHub, choose **Code → Codespaces → Create codespace**, and use the included `.devcontainer` configuration for Java 17 and Maven. In the terminal run `mvn clean verify`. Commit and push changes; Render can redeploy from the connected repository.
+
+## Configuration
+
+- `PORT`: server port (defaults to 8080)
+- `DATABASE_URL`: JDBC URL override (defaults to local H2 file)
+- `JAVA_OPTS`: JVM options in the Docker container
+
+## Important assumptions
+
+- Priorities are allocation tiers, not a hard promise that every order in a tier can be assigned when fleet capacity is insufficient.
+- Orders are indivisible; partial package assignment is not supported.
+- Distances are straight-line great-circle distances, not road-network driving distances or traffic estimates.
+- The current vehicle position is the start point for that vehicle's route; no return leg is included.
+- The API is stateless with respect to dispatch plans: a plan is recalculated from the current stored order and vehicle records each time it is requested.
+
+For PostgreSQL, include a JDBC URL such as `jdbc:postgresql://HOST:5432/DATABASE` in `DATABASE_URL`, and set `DB_USERNAME` and `DB_PASSWORD`. The PostgreSQL JDBC driver is included. H2 remains the default for local development and self-contained demos.
